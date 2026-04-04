@@ -104,6 +104,8 @@ export default function ARPeaks() {
   const [location, setLocation]     = useState(null);
   const [heading, setHeading]       = useState(null);   // compass degrees, null = unknown
   const [pitch, setPitch]           = useState(90);     // device beta; 90 = upright
+  // "none" | "ios" | "absolute" | "relative-fallback"
+  const [orientSource, setOrientSource] = useState("none");
 
   // Desktop sim
   const [simHeading, setSimHeading] = useState(60);
@@ -152,52 +154,67 @@ export default function ARPeaks() {
   }, []);
 
   // ── Device orientation ─────────────────────────────────────────────────────
-  const startOrientation = useCallback(async () => {
-    const handler = (e) => {
-      let h;
-      if (typeof e.webkitCompassHeading === "number") {
-        // iOS — already absolute, 0=N
-        h = e.webkitCompassHeading;
-      } else if (e.absolute && e.alpha != null) {
-        h = (360 - e.alpha) % 360;
-      } else if (e.alpha != null) {
-        h = (360 - e.alpha) % 360;
-      }
-      if (h != null) setHeading(h);
+  const startOrientation = useCallback(() => {
+    // iOS handler — webkitCompassHeading is always compass-true
+    const iosHandler = (e) => {
+      if (typeof e.webkitCompassHeading !== "number") return;
+      setOrientSource("ios");
+      setHeading(e.webkitCompassHeading);
       if (e.beta != null) setPitch(e.beta);
       orientRef.current = e;
     };
 
-    // iOS 13+ requires explicit permission
-    if (
-      typeof DeviceOrientationEvent !== "undefined" &&
-      typeof DeviceOrientationEvent.requestPermission === "function"
-    ) {
-      try {
-        const res = await DeviceOrientationEvent.requestPermission();
-        if (res === "granted") {
-          window.addEventListener("deviceorientationabsolute", handler, true);
-          window.addEventListener("deviceorientation", handler, true);
-        }
-      } catch { /* denied */ }
-    } else {
-      window.addEventListener("deviceorientationabsolute", handler, true);
-      window.addEventListener("deviceorientation", handler, true);
-    }
+    // Android — ONLY accept events where e.absolute === true
+    const absoluteHandler = (e) => {
+      if (!e.absolute || e.alpha == null) return;
+      setOrientSource("absolute");
+      setHeading((360 - e.alpha) % 360);
+      if (e.beta != null) setPitch(e.beta);
+      orientRef.current = e;
+    };
+
+    // Permission is already obtained in initialize() before this is called.
+    // Just register the listeners directly.
+    window.addEventListener("deviceorientationabsolute", absoluteHandler, true);
+    window.addEventListener("deviceorientation", iosHandler, true);
 
     return () => {
-      window.removeEventListener("deviceorientationabsolute", handler, true);
-      window.removeEventListener("deviceorientation", handler, true);
+      window.removeEventListener("deviceorientationabsolute", absoluteHandler, true);
+      window.removeEventListener("deviceorientation", iosHandler, true);
     };
   }, []);
 
   // ── Initialize ─────────────────────────────────────────────────────────────
   const initialize = useCallback(async () => {
     setPhase("loading");
+
+    // ⚠️ iOS Safari: requestPermission() MUST be called first — before any
+    // other awaits — while still inside the synchronous user-gesture context.
+    // Awaiting getUserMedia() first breaks the gesture chain and iOS silently
+    // denies orientation access.
+    let orientGranted = true; // non-iOS: no permission API, assume available
+    if (
+      typeof DeviceOrientationEvent !== "undefined" &&
+      typeof DeviceOrientationEvent.requestPermission === "function"
+    ) {
+      try {
+        const res = await DeviceOrientationEvent.requestPermission();
+        orientGranted = res === "granted";
+      } catch {
+        orientGranted = false;
+      }
+    }
+
     await startCamera();
     startLocation();
-    if (!isDesktop) await startOrientation();
-    else setLocation(DEMO_LOCATION);
+
+    if (!isDesktop) {
+      if (orientGranted) startOrientation();
+      else setError("Compass access denied — labels won\'t track rotation.");
+    } else {
+      setLocation(DEMO_LOCATION);
+    }
+
     setPhase("ready");
   }, [startCamera, startLocation, startOrientation, isDesktop]);
 
@@ -205,37 +222,45 @@ export default function ARPeaks() {
   useEffect(() => {
     if (phase !== "ready") return;
 
-    const loc     = location ?? DEMO_LOCATION;
-    const h       = isDesktop ? simHeading : (heading ?? simHeading);
-    // beta=90 → upright/horizon; tilt up → beta increases above 90
+    // On mobile, don't render anything until we have a real compass heading.
+    // This prevents all peaks flooding the screen with a stale/zero heading.
+    if (!isDesktop && heading === null) {
+      setLabels([]);
+      return;
+    }
+
+    const loc = location ?? DEMO_LOCATION;
+    const h   = isDesktop ? simHeading : heading;
+    // beta=90 → device upright / horizon; tilting up increases beta
     const tiltAboveHorizon = (isDesktop ? 0 : pitch) - 90;
 
     const computed = PEAKS.map((peak) => {
-      const dist  = getDistanceM(loc.lat, loc.lng, peak.lat, peak.lng);
+      const dist = getDistanceM(loc.lat, loc.lng, peak.lat, peak.lng);
       if (dist > MAX_DIST || dist < 100) return null;
 
-      const az      = getBearing(loc.lat, loc.lng, peak.lat, peak.lng);
-      const elvAng  = getElevAngle(loc.elev, peak.elev, dist);
+      const az     = getBearing(loc.lat, loc.lng, peak.lat, peak.lng);
+      const elvAng = getElevAngle(loc.elev, peak.elev, dist);
 
-      const hDiff = shortAngle(az, h);            // + = right
-      const vDiff = elvAng - tiltAboveHorizon;    // + = above horizon
+      const hDiff = shortAngle(az, h);          // +right
+      const vDiff = elvAng - tiltAboveHorizon;  // +above horizon
 
-      const x = 50 + (hDiff / H_FOV) * 100;      // %
-      const y = 50 - (vDiff / V_FOV) * 100;      // %
+      const x = 50 + (hDiff / H_FOV) * 100;    // %
+      const y = 50 - (vDiff / V_FOV) * 100;    // %
 
-      if (x < -15 || x > 115 || y < -20 || y > 120) return null;
+      // Strict: only render peaks actually inside the camera FOV
+      if (x < 2 || x > 98 || y < 2 || y > 98) return null;
 
-      const distKm   = (dist / 1000).toFixed(1);
-      const elevFt   = Math.round(peak.elev * 3.28084).toLocaleString();
-      const isFocus  = Math.abs(hDiff) < 5 && Math.abs(vDiff) < 4;
+      const distKm  = (dist / 1000).toFixed(1);
+      const elevFt  = Math.round(peak.elev * 3.28084).toLocaleString();
+      const isFocus = Math.abs(hDiff) < 5 && Math.abs(vDiff) < 4;
 
       return { ...peak, x, y, dist, distKm, elevFt, isFocus, az };
     })
       .filter(Boolean)
-      .sort((a, b) => b.dist - a.dist); // paint far ones first
+      .sort((a, b) => b.dist - a.dist);
 
     setLabels(computed);
-  }, [phase, location, heading, pitch, simHeading, isDesktop]);
+  }, [phase, location, heading, pitch, simHeading, isDesktop, orientSource]);
 
   // ── Desktop drag-to-pan ────────────────────────────────────────────────────
   const onPointerDown = (e) => {
@@ -250,9 +275,10 @@ export default function ARPeaks() {
   };
   const onPointerUp = () => { dragRef.current.active = false; };
 
-  const effectiveHeading = isDesktop ? simHeading : (heading ?? 0);
-  const compassReady     = !isDesktop && heading != null;
-  const gpsReady         = location != null && !isDesktop;
+  const effectiveHeading  = isDesktop ? simHeading : (heading ?? 0);
+  const compassReady      = !isDesktop && heading !== null;
+  const compassWaiting    = !isDesktop && heading === null;
+  const gpsReady          = location !== null && !isDesktop;
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -541,14 +567,45 @@ export default function ARPeaks() {
               <PeakLabel key={peak.name} peak={peak} />
             ))}
 
-            {/* No peaks in view */}
-            {labels.length === 0 && (
+            {/* Waiting for compass */}
+            {compassWaiting && (
+              <div style={{
+                position: "absolute", top: "50%", left: "50%",
+                transform: "translate(-50%, -50%)",
+                background: "rgba(6,12,20,0.88)",
+                border: "1px solid rgba(245,158,11,0.3)",
+                borderRadius: 3, padding: "18px 28px",
+                textAlign: "center", pointerEvents: "none",
+              }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: "50%",
+                  border: "2px solid #1a2a3a", borderTopColor: "var(--amber)",
+                  animation: "spin 0.8s linear infinite",
+                  margin: "0 auto 12px",
+                }} />
+                <div style={{
+                  color: "var(--amber)", fontSize: 11,
+                  fontFamily: "'DM Mono', monospace", letterSpacing: "0.15em",
+                }}>
+                  AWAITING COMPASS SIGNAL
+                </div>
+                <div style={{
+                  color: "#2a4560", fontSize: 9, marginTop: 6,
+                  fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em",
+                }}>
+                  Point device toward sky · Move slowly
+                </div>
+              </div>
+            )}
+
+            {/* No peaks in view (compass is working but nothing in frame) */}
+            {!compassWaiting && labels.length === 0 && (
               <div style={{
                 position: "absolute", bottom: 90, left: "50%",
                 transform: "translateX(-50%)",
                 color: "rgba(255,255,255,0.25)", fontSize: 11,
                 letterSpacing: "0.15em", fontFamily: "'DM Mono', monospace",
-                textAlign: "center",
+                textAlign: "center", whiteSpace: "nowrap",
               }}>
                 NO PEAKS IN FIELD OF VIEW
                 {isDesktop && " — DRAG TO PAN"}
@@ -602,7 +659,8 @@ export default function ARPeaks() {
                 lineHeight: 1.9, minWidth: 180,
               }}>
                 <div style={{ color: "var(--amber)", marginBottom: 4, letterSpacing: "0.1em" }}>// SENSOR DATA</div>
-                <div>heading   {Math.round(effectiveHeading)}°</div>
+                <div>source    {orientSource}</div>
+                <div>heading   {heading !== null ? Math.round(heading) + "°" : "null"}</div>
                 <div>pitch     {Math.round(pitch)}° (beta)</div>
                 <div>lat       {(location ?? DEMO_LOCATION).lat.toFixed(5)}</div>
                 <div>lng       {(location ?? DEMO_LOCATION).lng.toFixed(5)}</div>
