@@ -31,6 +31,18 @@ const H_FOV = 65;   // horizontal field of view in degrees
 const V_FOV = 48;   // vertical field of view in degrees
 const MAX_DIST = 180000; // only show peaks within 180 km
 
+// ── Calibration ─────────────────────────────────────────────────────────────
+// Magnetic declination for San Diego ~11.5° East (2025).
+// true heading = magnetic + DECLINATION
+// Positive = East declination (most of continental US). Look up your location:
+// https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml
+const MAGNETIC_DECLINATION = 11.5;
+
+// iOS reports beta=90 when perfectly upright, but people hold phones tilted
+// back ~15° when aiming at distant mountains. This offset corrects for that.
+// Increase (less negative) if labels are too LOW; decrease if too HIGH.
+const PITCH_OFFSET = -15;
+
 // Default demo location: Mission Trails Regional Park
 const DEMO_LOCATION = { lat: 32.8172, lng: -117.0519, elev: 120 };
 
@@ -114,6 +126,10 @@ export default function ARPeaks() {
   const [labels, setLabels]         = useState([]);
   const [showDebug, setShowDebug]   = useState(false);
 
+  // Runtime calibration (overrides constants, persisted via state only)
+  const [declination, setDeclination] = useState(MAGNETIC_DECLINATION);
+  const [pitchOffset, setPitchOffset] = useState(PITCH_OFFSET);
+
   // ── Detect platform ────────────────────────────────────────────────────────
   useEffect(() => {
     const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -155,11 +171,11 @@ export default function ARPeaks() {
 
   // ── Device orientation ─────────────────────────────────────────────────────
   const startOrientation = useCallback(() => {
-    // iOS handler — webkitCompassHeading is always compass-true
+    // iOS handler — webkitCompassHeading is magnetic; add declination for true north
     const iosHandler = (e) => {
       if (typeof e.webkitCompassHeading !== "number") return;
       setOrientSource("ios");
-      setHeading(e.webkitCompassHeading);
+      setHeading((e.webkitCompassHeading + declination + 360) % 360);
       if (e.beta != null) setPitch(e.beta);
       orientRef.current = e;
     };
@@ -231,8 +247,9 @@ export default function ARPeaks() {
 
     const loc = location ?? DEMO_LOCATION;
     const h   = isDesktop ? simHeading : heading;
-    // beta=90 → device upright / horizon; tilting up increases beta
-    const tiltAboveHorizon = (isDesktop ? 0 : pitch) - 90;
+    // beta=90 → perfectly upright; real camera hold is ~75°.
+    // PITCH_OFFSET compensates for typical phone tilt when aiming at mountains.
+    const tiltAboveHorizon = (isDesktop ? 0 : pitch) - 90 + (isDesktop ? 0 : pitchOffset);
 
     const computed = PEAKS.map((peak) => {
       const dist = getDistanceM(loc.lat, loc.lng, peak.lat, peak.lng);
@@ -260,7 +277,7 @@ export default function ARPeaks() {
       .sort((a, b) => b.dist - a.dist);
 
     setLabels(computed);
-  }, [phase, location, heading, pitch, simHeading, isDesktop, orientSource]);
+  }, [phase, location, heading, pitch, simHeading, isDesktop, orientSource, declination, pitchOffset]);
 
   // ── Desktop drag-to-pan ────────────────────────────────────────────────────
   const onPointerDown = (e) => {
@@ -658,16 +675,46 @@ export default function ARPeaks() {
                 fontFamily: "'DM Mono', monospace",
                 lineHeight: 1.9, minWidth: 180,
               }}>
-                <div style={{ color: "var(--amber)", marginBottom: 4, letterSpacing: "0.1em" }}>// SENSOR DATA</div>
+                <div style={{ color: "var(--amber)", marginBottom: 6, letterSpacing: "0.1em" }}>// SENSOR DATA</div>
                 <div>source    {orientSource}</div>
                 <div>heading   {heading !== null ? Math.round(heading) + "°" : "null"}</div>
-                <div>pitch     {Math.round(pitch)}° (beta)</div>
-                <div>lat       {(location ?? DEMO_LOCATION).lat.toFixed(5)}</div>
-                <div>lng       {(location ?? DEMO_LOCATION).lng.toFixed(5)}</div>
-                <div>elev      {(location ?? DEMO_LOCATION).elev.toFixed(0)}m</div>
+                <div>pitch β   {Math.round(pitch)}°</div>
+                <div>lat       {(location ?? DEMO_LOCATION).lat.toFixed(4)}</div>
+                <div>lng       {(location ?? DEMO_LOCATION).lng.toFixed(4)}</div>
                 <div>peaks_vis {labels.length}</div>
-                <div>h_fov     {H_FOV}°</div>
-                <div>v_fov     {V_FOV}°</div>
+
+                <div style={{ color: "var(--amber)", margin: "8px 0 4px", letterSpacing: "0.1em" }}>// CALIBRATION</div>
+
+                <div style={{ marginBottom: 6 }}>
+                  <div style={{ marginBottom: 2 }}>
+                    declination {declination > 0 ? "+" : ""}{declination.toFixed(1)}°
+                  </div>
+                  <input type="range" min="-20" max="20" step="0.5"
+                    value={declination}
+                    onChange={e => setDeclination(parseFloat(e.target.value))}
+                    style={{ width: "100%", accentColor: "var(--amber)", pointerEvents: "all" }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#2a4560" }}>
+                    <span>−20° W</span><span>0</span><span>+20° E</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ marginBottom: 2 }}>
+                    pitch offset {pitchOffset > 0 ? "+" : ""}{pitchOffset.toFixed(0)}°
+                    <span style={{ color: "#2a4560", marginLeft: 4 }}>
+                      {pitchOffset < 0 ? "↓ lower" : "↑ higher"}
+                    </span>
+                  </div>
+                  <input type="range" min="-30" max="10" step="1"
+                    value={pitchOffset}
+                    onChange={e => setPitchOffset(parseFloat(e.target.value))}
+                    style={{ width: "100%", accentColor: "var(--amber)", pointerEvents: "all" }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#2a4560" }}>
+                    <span>−30 (lower)</span><span>+10 (higher)</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
