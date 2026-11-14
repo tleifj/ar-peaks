@@ -114,6 +114,7 @@ export default function ARPeaks() {
   const rawRef           = useRef(null); // latest absolute (magnetic) orientation sample
   const compassOffsetRef = useRef(null); // iOS: smoothed gyro→compass yaw offset {s, c}
   const smoothRRef       = useRef(null);
+  const eventCountRef    = useRef(0);
 
   const [phase, setPhase]           = useState("start"); // start | loading | ready
   const [error, setError]           = useState(null);
@@ -127,6 +128,7 @@ export default function ARPeaks() {
   const [deviceR, setDeviceR]       = useState(null);   // smoothed device→Earth rotation (magnetic)
   const [compassAccuracy, setCompassAccuracy] = useState(null);
   const [compassRaw, setCompassRaw] = useState(null); // iOS webkitCompassHeading (magnetic)
+  const [eventRate, setEventRate]   = useState(0);    // orientation events / second
   // "none" | "ios" | "absolute"
   const [orientSource, setOrientSource] = useState("none");
 
@@ -242,6 +244,7 @@ export default function ARPeaks() {
     const onAbsolute = (e) => {
       if (!e.absolute || e.alpha == null || e.beta == null || e.gamma == null) return;
       rawRef.current = { alpha: e.alpha, beta: e.beta, gamma: e.gamma, source: "absolute", accuracy: null };
+      eventCountRef.current++;
     };
 
     // iOS: alpha is relative to wherever the phone pointed at startup, while
@@ -270,6 +273,7 @@ export default function ARPeaks() {
         beta: e.beta, gamma: e.gamma,
         source: "ios", accuracy: e.webkitCompassAccuracy, compass: e.webkitCompassHeading,
       };
+      eventCountRef.current++;
     };
 
     window.addEventListener("deviceorientationabsolute", onAbsolute, true);
@@ -284,6 +288,10 @@ export default function ARPeaks() {
   useEffect(() => {
     if (phase !== "ready" || isDesktop) return;
     let id;
+    const rateTimer = setInterval(() => {
+      setEventRate(eventCountRef.current);
+      eventCountRef.current = 0;
+    }, 1000);
     const tick = () => {
       const r = rawRef.current;
       if (r) {
@@ -296,7 +304,7 @@ export default function ARPeaks() {
       id = requestAnimationFrame(tick);
     };
     id = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(id);
+    return () => { cancelAnimationFrame(id); clearInterval(rateTimer); };
   }, [phase, isDesktop]);
 
   // ── Initialize ─────────────────────────────────────────────────────────────
@@ -375,6 +383,16 @@ export default function ARPeaks() {
       .filter(Boolean)
       .sort((a, b) => b.dist - a.dist);
   }, [phase, R, pose, observer, projection]);
+
+  // Debug: compass ticks on the true horizon every 10°, projected like labels.
+  // They must stay glued to the real world; their spacing reveals FOV errors.
+  const horizonTicks = useMemo(() => {
+    if (!showDebug || !pose) return [];
+    const base = Math.round(pose.heading / 10) * 10;
+    return Array.from({ length: 19 }, (_, i) => normDeg(base + (i - 9) * 10))
+      .map((az) => ({ az, s: project(R, dirVector(az, 0), projection) }))
+      .filter(({ s }) => s && s.x >= 0 && s.x <= projection.viewW && s.y >= 0 && s.y <= projection.viewH);
+  }, [showDebug, R, pose, projection]);
 
   // True horizon line (a straight line under pinhole projection)
   const horizon = useMemo(() => {
@@ -706,6 +724,16 @@ export default function ARPeaks() {
               </div>
             </div>
 
+            {horizonTicks.map(({ az, s }) => (
+              <div key={az} style={{
+                position: "absolute", left: s.x, top: s.y, transform: "translate(-50%, -100%)",
+                color: "var(--sky)", fontSize: 9, fontFamily: "'DM Mono', monospace", textAlign: "center",
+              }}>
+                {az % 90 === 0 ? compassLabel(az) : az}
+                <div style={{ width: 1, height: 10, background: "var(--sky)", margin: "0 auto" }} />
+              </div>
+            ))}
+
             {/* ── PEAK LABELS ── */}
             {labels.map((peak) => (
               <PeakLabel key={peak.name} peak={peak} />
@@ -803,7 +831,8 @@ export default function ARPeaks() {
                 lineHeight: 1.9, minWidth: 180,
               }}>
                 <div style={{ color: "var(--amber)", marginBottom: 6, letterSpacing: "0.1em" }}>// SENSOR DATA</div>
-                <div>source    {isDesktop ? "sim" : orientSource}{compassAccuracy != null && ` ±${Math.round(compassAccuracy)}°`}</div>
+                <div>build     {import.meta.env.VITE_BUILD_ID}</div>
+                <div>source    {isDesktop ? "sim" : orientSource}{compassAccuracy != null && ` ±${Math.round(compassAccuracy)}°`}{!isDesktop && ` · ${eventRate}/s`}</div>
                 <div>heading   {pose ? Math.round(pose.heading) + "° true" : "null"}</div>
                 {compassRaw != null && <div>compass   {Math.round(compassRaw)}° mag (raw)</div>}
                 <div>adj       {calibration.headingOffset.toFixed(1)}° hdg · {calibration.pitchOffset.toFixed(1)}° pitch</div>
