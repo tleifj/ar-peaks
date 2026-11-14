@@ -87,7 +87,7 @@ function compassLabel(h) {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = {
   root: {
-    width: "100vw", height: "100vh",
+    width: "100vw", height: "100dvh",
     background: "#0a0e14",
     position: "relative", overflow: "hidden",
     fontFamily: "'DM Mono', 'Courier New', monospace",
@@ -108,6 +108,7 @@ const styles = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function ARPeaks() {
+  const rootRef          = useRef(null);
   const videoRef         = useRef(null);
   const dragRef          = useRef({ active: false, startX: 0, startY: 0, startHeading: 0, startPitch: 0 });
   const rawRef           = useRef(null); // latest absolute (magnetic) orientation sample
@@ -125,6 +126,7 @@ export default function ARPeaks() {
   const [groundElev, setGroundElev] = useState(null);   // terrain elevation at user (m, MSL)
   const [deviceR, setDeviceR]       = useState(null);   // smoothed device→Earth rotation (magnetic)
   const [compassAccuracy, setCompassAccuracy] = useState(null);
+  const [compassRaw, setCompassRaw] = useState(null); // iOS webkitCompassHeading (magnetic)
   // "none" | "ios" | "absolute"
   const [orientSource, setOrientSource] = useState("none");
 
@@ -148,13 +150,17 @@ export default function ARPeaks() {
   }, [calibration]);
 
   // ── Viewport / screen orientation ─────────────────────────────────────────
+  // Measure the actual root box: on iOS Safari 100vh ≠ innerHeight (toolbars),
+  // and the video, crosshair and labels are all laid out in the root box.
   useEffect(() => {
-    const update = () => setViewport({ w: window.innerWidth, h: window.innerHeight, angle: getScreenAngle() });
-    window.addEventListener("resize", update);
+    const el = rootRef.current;
+    const update = () => setViewport({ w: el.clientWidth, h: el.clientHeight, angle: getScreenAngle() });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
     window.addEventListener("orientationchange", update);
     screen.orientation?.addEventListener?.("change", update);
     return () => {
-      window.removeEventListener("resize", update);
+      ro.disconnect();
       window.removeEventListener("orientationchange", update);
       screen.orientation?.removeEventListener?.("change", update);
     };
@@ -262,7 +268,7 @@ export default function ARPeaks() {
       rawRef.current = {
         alpha: e.alpha + toDeg(Math.atan2(o.s, o.c)),
         beta: e.beta, gamma: e.gamma,
-        source: "ios", accuracy: e.webkitCompassAccuracy,
+        source: "ios", accuracy: e.webkitCompassAccuracy, compass: e.webkitCompassHeading,
       };
     };
 
@@ -285,6 +291,7 @@ export default function ARPeaks() {
         setDeviceR(smoothRRef.current);
         setOrientSource(r.source);
         setCompassAccuracy(r.accuracy);
+        setCompassRaw(r.compass ?? null);
       }
       id = requestAnimationFrame(tick);
     };
@@ -460,6 +467,7 @@ export default function ARPeaks() {
       `}</style>
 
       <div
+        ref={rootRef}
         style={styles.root}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -797,12 +805,17 @@ export default function ARPeaks() {
                 <div style={{ color: "var(--amber)", marginBottom: 6, letterSpacing: "0.1em" }}>// SENSOR DATA</div>
                 <div>source    {isDesktop ? "sim" : orientSource}{compassAccuracy != null && ` ±${Math.round(compassAccuracy)}°`}</div>
                 <div>heading   {pose ? Math.round(pose.heading) + "° true" : "null"}</div>
+                {compassRaw != null && <div>compass   {Math.round(compassRaw)}° mag (raw)</div>}
+                <div>adj       {calibration.headingOffset.toFixed(1)}° hdg · {calibration.pitchOffset.toFixed(1)}° pitch</div>
                 <div>pitch     {pose ? pose.pitch.toFixed(1) + "°" : "null"}</div>
                 <div>lat       {observer.lat.toFixed(5)}</div>
                 <div>lng       {observer.lng.toFixed(5)}</div>
-                <div>gps acc   {location?.accuracy != null ? "±" + Math.round(location.accuracy) + " m" : "demo"}</div>
+                <div style={{ color: location ? undefined : "var(--red)" }}>
+                  gps acc   {location?.accuracy != null ? "±" + Math.round(location.accuracy) + " m" : "NONE — using demo location"}
+                </div>
                 <div>elev      {Math.round(observer.elev)} m ({observer.elevSource})</div>
                 <div>fov       {visibleFov(projection.viewW)}° × {visibleFov(projection.viewH)}°{videoSize ? ` (${videoSize.w}×${videoSize.h})` : ""}</div>
+                <div>view      {Math.round(projection.viewW)}×{Math.round(projection.viewH)} @ {projection.screenAngle}°</div>
                 <div>peaks_vis {labels.length}</div>
 
                 <div style={{ color: "var(--amber)", margin: "8px 0 4px", letterSpacing: "0.1em" }}>// CALIBRATION</div>
