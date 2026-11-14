@@ -1,4 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  normDeg, shortAngle, targetVector, dirVector, rotationFromEuler,
+  applyCalibration, smoothRotation, cameraPose, focalLengthPx, project, toDeg,
+} from "./arMath";
 
 // ─── Peak Database ─────────────────────────────────────────────────────────
 const PEAKS = [
@@ -19,17 +23,26 @@ const PEAKS = [
   // { name: "El Cajon Mountain",  lat: 32.8967, lng: -116.8297, elev: 1274 },
   // { name: "Iron Mountain",      lat: 33.0019, lng: -116.9447, elev:  937 },
   // { name: "Woodson Mountain",   lat: 33.0031, lng: -117.0019, elev:  843 },
-  { name: "Cowles Mountain",    lat: 32.8161, lng: -117.0333, elev:  516 },
-  { name: "North Fortuna",      lat: 32.8264, lng: -117.0481, elev:  400 },
-  { name: "South Fortuna",      lat: 32.8178, lng: -117.0467, elev:  381 },
-  { name: "Kwaay Paay Peak",    lat: 32.8339, lng: -117.0417, elev:  273 },
-  { name: "Pyles Peak",         lat: 32.8233, lng: -117.0556, elev:  323 },
+  // Summit coordinates (NAD83/WGS84) & elevations (NAVD88) from USGS / ListsOfJohn
+  { name: "Cowles Mountain",    lat: 32.8125, lng: -117.0311, elev:  486 },
+  { name: "North Fortuna",      lat: 32.8469, lng: -117.0609, elev:  394 },
+  { name: "South Fortuna",      lat: 32.8352, lng: -117.0550, elev:  333 },
+  { name: "Kwaay Paay Peak",    lat: 32.8279, lng: -117.0461, elev:  364 },
+  { name: "Pyles Peak",         lat: 32.8230, lng: -117.0382, elev:  420 },
 ];
 
 // ─── Constants ─────────────────────────────────────────────────────────────
-const H_FOV = 65;   // horizontal field of view in degrees
-const V_FOV = 48;   // vertical field of view in degrees
 const MAX_DIST = 180000; // only show peaks within 180 km
+
+// Field of view across the LONG side of the camera frame. Typical phone main
+// ("1x", ~26 mm-equivalent) cameras are 65–70°. The visible FOV on screen is
+// derived from this, the video resolution and the object-fit: cover crop.
+const CAMERA_FOV_LONG = 67;
+
+// Observer eye height above ground when using terrain elevation
+const EYE_HEIGHT = 1.6;
+// Re-query terrain elevation when the user moves ~30 m
+const DEM_GRID = 0.0003;
 
 // ── Calibration ─────────────────────────────────────────────────────────────
 // Magnetic declination for San Diego ~11.5° East (2025).
@@ -38,40 +51,32 @@ const MAX_DIST = 180000; // only show peaks within 180 km
 // https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml
 const MAGNETIC_DECLINATION = 11.5;
 
-// iOS reports beta=90 when perfectly upright, but people hold phones tilted
-// back ~15° when aiming at distant mountains. This offset corrects for that.
-// Increase (less negative) if labels are too LOW; decrease if too HIGH.
-const PITCH_OFFSET = -15;
+const DEFAULT_CALIBRATION = {
+  declination: MAGNETIC_DECLINATION,
+  headingOffset: 0, // residual compass error, set by "align to peak"
+  pitchOffset: 0,   // residual tilt error, set by "align to peak"
+  fov: CAMERA_FOV_LONG,
+};
+const CALIBRATION_KEY = "peakar.calibration.v2";
+
+// Orientation smoothing (0..1, higher = more responsive, more jitter)
+const ROTATION_SMOOTHING = 0.25;
+// iOS: the compass (noisy) anchors the gyro (smooth, but relative) heading
+const COMPASS_SMOOTHING = 0.03;
 
 // Default demo location: Mission Trails Regional Park
 const DEMO_LOCATION = { lat: 32.8172, lng: -117.0519, elev: 120 };
 
-// ─── Math Utilities ─────────────────────────────────────────────────────────
-const toRad = (d) => (d * Math.PI) / 180;
-const toDeg = (r) => (r * 180) / Math.PI;
-
-function getBearing(lat1, lng1, lat2, lng2) {
-  const f1 = toRad(lat1), f2 = toRad(lat2), dl = toRad(lng2 - lng1);
-  const y = Math.sin(dl) * Math.cos(f2);
-  const x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
-  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+function loadCalibration() {
+  try {
+    return { ...DEFAULT_CALIBRATION, ...JSON.parse(localStorage.getItem(CALIBRATION_KEY) ?? "{}") };
+  } catch {
+    return DEFAULT_CALIBRATION;
+  }
 }
 
-function getDistanceM(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const f1 = toRad(lat1), f2 = toRad(lat2);
-  const df = toRad(lat2 - lat1), dl = toRad(lng2 - lng1);
-  const a = Math.sin(df / 2) ** 2 + Math.cos(f1) * Math.cos(f2) * Math.sin(dl / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function getElevAngle(userElev, peakElev, distM) {
-  return toDeg(Math.atan2(peakElev - userElev, distM));
-}
-
-// Shortest angular difference: result in [-180, 180]
-function shortAngle(a, b) {
-  return ((a - b + 540) % 360) - 180;
+function getScreenAngle() {
+  return screen.orientation?.angle ?? (typeof window.orientation === "number" ? window.orientation : 0);
 }
 
 function compassLabel(h) {
@@ -103,37 +108,56 @@ const styles = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function ARPeaks() {
-  const videoRef       = useRef(null);
-  const dragRef        = useRef({ active: false, startX: 0, startHeading: 0 });
-  const orientRef      = useRef(null); // latest raw orientation
+  const videoRef         = useRef(null);
+  const dragRef          = useRef({ active: false, startX: 0, startY: 0, startHeading: 0, startPitch: 0 });
+  const rawRef           = useRef(null); // latest absolute (magnetic) orientation sample
+  const compassOffsetRef = useRef(null); // iOS: smoothed gyro→compass yaw offset {s, c}
+  const smoothRRef       = useRef(null);
 
   const [phase, setPhase]           = useState("start"); // start | loading | ready
   const [error, setError]           = useState(null);
-  const [isDesktop, setIsDesktop]   = useState(false);
+  const [isDesktop]                 = useState(() => !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
   const [cameraOn, setCameraOn]     = useState(false);
+  const [orientGranted, setOrientGranted] = useState(false);
 
   // Sensors
-  const [location, setLocation]     = useState(null);
-  const [heading, setHeading]       = useState(null);   // compass degrees, null = unknown
-  const [pitch, setPitch]           = useState(90);     // device beta; 90 = upright
-  // "none" | "ios" | "absolute" | "relative-fallback"
+  const [location, setLocation]     = useState(null);   // { lat, lng, alt, accuracy }
+  const [groundElev, setGroundElev] = useState(null);   // terrain elevation at user (m, MSL)
+  const [deviceR, setDeviceR]       = useState(null);   // smoothed device→Earth rotation (magnetic)
+  const [compassAccuracy, setCompassAccuracy] = useState(null);
+  // "none" | "ios" | "absolute"
   const [orientSource, setOrientSource] = useState("none");
 
   // Desktop sim
   const [simHeading, setSimHeading] = useState(60);
+  const [simPitch, setSimPitch]     = useState(0);
 
-  // Computed labels
-  const [labels, setLabels]         = useState([]);
+  // Screen / camera geometry
+  const [viewport, setViewport]     = useState(() => ({ w: window.innerWidth, h: window.innerHeight, angle: getScreenAngle() }));
+  const [videoSize, setVideoSize]   = useState(null);
+
   const [showDebug, setShowDebug]   = useState(false);
 
-  // Runtime calibration (overrides constants, persisted via state only)
-  const [declination, setDeclination] = useState(MAGNETIC_DECLINATION);
-  const [pitchOffset, setPitchOffset] = useState(PITCH_OFFSET);
+  // Runtime calibration (persisted to localStorage)
+  const [calibration, setCalibration] = useState(loadCalibration);
+  const [alignPeak, setAlignPeak]     = useState(PEAKS[0].name);
+  const updateCalibration = (patch) => setCalibration((c) => ({ ...c, ...patch }));
 
-  // ── Detect platform ────────────────────────────────────────────────────────
   useEffect(() => {
-    const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    setIsDesktop(!mobile);
+    localStorage.setItem(CALIBRATION_KEY, JSON.stringify(calibration));
+  }, [calibration]);
+
+  // ── Viewport / screen orientation ─────────────────────────────────────────
+  useEffect(() => {
+    const update = () => setViewport({ w: window.innerWidth, h: window.innerHeight, angle: getScreenAngle() });
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    screen.orientation?.addEventListener?.("change", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      screen.orientation?.removeEventListener?.("change", update);
+    };
   }, []);
 
   // ── Camera ─────────────────────────────────────────────────────────────────
@@ -153,52 +177,120 @@ export default function ARPeaks() {
     }
   }, []);
 
-  // ── Geolocation ────────────────────────────────────────────────────────────
-  const startLocation = useCallback(() => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
+  const onVideoResize = (e) => {
+    const { videoWidth: w, videoHeight: h } = e.currentTarget;
+    if (w && h) setVideoSize({ w, h });
+  };
+
+  // ── Geolocation (continuous — first fixes are often coarse) ───────────────
+  useEffect(() => {
+    if (phase !== "ready" || isDesktop || !navigator.geolocation) return;
+    const id = navigator.geolocation.watchPosition(
       (pos) => {
         setLocation({
           lat: pos.coords.latitude,
-          lng:  pos.coords.longitude,
-          elev: pos.coords.altitude ?? DEMO_LOCATION.elev,
+          lng: pos.coords.longitude,
+          alt: pos.coords.altitude,
+          accuracy: pos.coords.accuracy,
         });
+        setError((e) => (e?.startsWith("Location") ? null : e));
       },
-      () => {/* use demo loc */},
-      { enableHighAccuracy: true, timeout: 10000 }
+      (err) => setError(`Location unavailable (${err.message}) — using demo location.`),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
-  }, []);
+    return () => navigator.geolocation.clearWatch(id);
+  }, [phase, isDesktop]);
+
+  const baseLocation = (!isDesktop && location) || DEMO_LOCATION;
+
+  // ── Terrain elevation ──────────────────────────────────────────────────────
+  // GPS altitude is noisy (±10–30 m), often ellipsoidal rather than sea-level
+  // (~35 m off in San Diego) and frequently null. Use a DEM lookup instead.
+  const snap = (d) => (Math.round(d / DEM_GRID) * DEM_GRID).toFixed(4);
+  const demKey = `${snap(baseLocation.lat)},${snap(baseLocation.lng)}`;
+  useEffect(() => {
+    if (phase !== "ready") return;
+    const ctrl = new AbortController();
+    const [lat, lng] = demKey.split(",");
+    fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lng}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))))
+      .then((d) => { if (Number.isFinite(d?.elevation?.[0])) setGroundElev(d.elevation[0]); })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [phase, demKey]);
+
+  const observer = useMemo(() => {
+    const gpsAlt = baseLocation.alt ?? baseLocation.elev;
+    if (groundElev != null) return { ...baseLocation, elev: groundElev + EYE_HEIGHT, elevSource: "terrain" };
+    if (gpsAlt != null) return { ...baseLocation, elev: gpsAlt, elevSource: baseLocation === DEMO_LOCATION ? "demo" : "gps" };
+    return { ...baseLocation, elev: DEMO_LOCATION.elev, elevSource: "default" };
+  }, [baseLocation, groundElev]);
 
   // ── Device orientation ─────────────────────────────────────────────────────
-  const startOrientation = useCallback(() => {
-    // iOS handler — webkitCompassHeading is magnetic; add declination for true north
-    const iosHandler = (e) => {
-      if (typeof e.webkitCompassHeading !== "number") return;
-      setOrientSource("ios");
-      setHeading((e.webkitCompassHeading + declination + 360) % 360);
-      if (e.beta != null) setPitch(e.beta);
-      orientRef.current = e;
+  // We keep the full alpha/beta/gamma rotation (not just alpha or beta), so
+  // heading and tilt stay correct when the phone is upright, tilted or rolled.
+  useEffect(() => {
+    if (phase !== "ready" || isDesktop || !orientGranted) return;
+
+    // Android Chrome: alpha is absolute (magnetic north)
+    const onAbsolute = (e) => {
+      if (!e.absolute || e.alpha == null || e.beta == null || e.gamma == null) return;
+      rawRef.current = { alpha: e.alpha, beta: e.beta, gamma: e.gamma, source: "absolute", accuracy: null };
     };
 
-    // Android — ONLY accept events where e.absolute === true
-    const absoluteHandler = (e) => {
-      if (!e.absolute || e.alpha == null) return;
-      setOrientSource("absolute");
-      setHeading((360 - e.alpha) % 360);
-      if (e.beta != null) setPitch(e.beta);
-      orientRef.current = e;
+    // iOS: alpha is relative to wherever the phone pointed at startup, while
+    // webkitCompassHeading (magnetic) is absolute but noisy. Fuse them: the
+    // gyro gives smooth motion, the compass slowly corrects the yaw offset.
+    const onRelative = (e) => {
+      if (typeof e.webkitCompassHeading !== "number") return onAbsolute(e);
+      if (e.alpha == null || e.beta == null || e.gamma == null) return;
+      if (e.webkitCompassAccuracy == null || e.webkitCompassAccuracy >= 0) {
+        const R = rotationFromEuler(e.alpha, e.beta, e.gamma);
+        const pose = cameraPose(R);
+        // iOS reports the camera direction when upright, the top edge when flat
+        const refHeading = Math.abs(pose.pitch) < 50
+          ? pose.heading
+          : normDeg(toDeg(Math.atan2(R[0][1], R[1][1])));
+        const off = ((refHeading - e.webkitCompassHeading) * Math.PI) / 180;
+        const o = compassOffsetRef.current;
+        compassOffsetRef.current = o
+          ? { s: o.s + (Math.sin(off) - o.s) * COMPASS_SMOOTHING, c: o.c + (Math.cos(off) - o.c) * COMPASS_SMOOTHING }
+          : { s: Math.sin(off), c: Math.cos(off) };
+      }
+      const o = compassOffsetRef.current;
+      if (!o) return;
+      rawRef.current = {
+        alpha: e.alpha + toDeg(Math.atan2(o.s, o.c)),
+        beta: e.beta, gamma: e.gamma,
+        source: "ios", accuracy: e.webkitCompassAccuracy,
+      };
     };
 
-    // Permission is already obtained in initialize() before this is called.
-    // Just register the listeners directly.
-    window.addEventListener("deviceorientationabsolute", absoluteHandler, true);
-    window.addEventListener("deviceorientation", iosHandler, true);
-
+    window.addEventListener("deviceorientationabsolute", onAbsolute, true);
+    window.addEventListener("deviceorientation", onRelative, true);
     return () => {
-      window.removeEventListener("deviceorientationabsolute", absoluteHandler, true);
-      window.removeEventListener("deviceorientation", iosHandler, true);
+      window.removeEventListener("deviceorientationabsolute", onAbsolute, true);
+      window.removeEventListener("deviceorientation", onRelative, true);
     };
-  }, []);
+  }, [phase, isDesktop, orientGranted]);
+
+  // Smooth + publish orientation once per animation frame
+  useEffect(() => {
+    if (phase !== "ready" || isDesktop) return;
+    let id;
+    const tick = () => {
+      const r = rawRef.current;
+      if (r) {
+        smoothRRef.current = smoothRotation(smoothRRef.current, rotationFromEuler(r.alpha, r.beta, r.gamma), ROTATION_SMOOTHING);
+        setDeviceR(smoothRRef.current);
+        setOrientSource(r.source);
+        setCompassAccuracy(r.accuracy);
+      }
+      id = requestAnimationFrame(tick);
+    };
+    id = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(id);
+  }, [phase, isDesktop]);
 
   // ── Initialize ─────────────────────────────────────────────────────────────
   const initialize = useCallback(async () => {
@@ -208,94 +300,116 @@ export default function ARPeaks() {
     // other awaits — while still inside the synchronous user-gesture context.
     // Awaiting getUserMedia() first breaks the gesture chain and iOS silently
     // denies orientation access.
-    let orientGranted = true; // non-iOS: no permission API, assume available
+    let granted = true; // non-iOS: no permission API, assume available
     if (
       typeof DeviceOrientationEvent !== "undefined" &&
       typeof DeviceOrientationEvent.requestPermission === "function"
     ) {
       try {
         const res = await DeviceOrientationEvent.requestPermission();
-        orientGranted = res === "granted";
+        granted = res === "granted";
       } catch {
-        orientGranted = false;
+        granted = false;
       }
     }
 
     await startCamera();
-    startLocation();
 
     if (!isDesktop) {
-      if (orientGranted) startOrientation();
-      else setError("Compass access denied — labels won\'t track rotation.");
-    } else {
-      setLocation(DEMO_LOCATION);
+      setOrientGranted(granted);
+      if (!granted) setError("Compass access denied — labels won't track rotation.");
     }
 
     setPhase("ready");
-  }, [startCamera, startLocation, startOrientation, isDesktop]);
+  }, [startCamera, isDesktop]);
+
+  // ── Camera pose (true north, calibrated) ──────────────────────────────────
+  const R = useMemo(() => {
+    if (isDesktop) {
+      return applyCalibration(rotationFromEuler(-simHeading, 90 + simPitch, 0), calibration.headingOffset, calibration.pitchOffset);
+    }
+    if (!deviceR) return null;
+    return applyCalibration(deviceR, calibration.declination + calibration.headingOffset, calibration.pitchOffset);
+  }, [isDesktop, simHeading, simPitch, deviceR, calibration]);
+
+  const pose = useMemo(() => (R ? cameraPose(R) : null), [R]);
+
+  const projection = useMemo(() => ({
+    f: focalLengthPx({
+      viewW: viewport.w, viewH: viewport.h,
+      videoW: cameraOn ? videoSize?.w : undefined,
+      videoH: cameraOn ? videoSize?.h : undefined,
+      fovLongDeg: calibration.fov,
+    }),
+    viewW: viewport.w, viewH: viewport.h,
+    screenAngle: isDesktop ? 0 : viewport.angle,
+  }), [viewport, videoSize, cameraOn, calibration.fov, isDesktop]);
 
   // ── Compute label positions ────────────────────────────────────────────────
-  useEffect(() => {
-    if (phase !== "ready") return;
-
+  const labels = useMemo(() => {
     // On mobile, don't render anything until we have a real compass heading.
-    // This prevents all peaks flooding the screen with a stale/zero heading.
-    if (!isDesktop && heading === null) {
-      setLabels([]);
-      return;
-    }
+    if (phase !== "ready" || !R) return [];
+    return PEAKS.map((peak) => {
+      const t = targetVector(observer, peak);
+      if (t.dist > MAX_DIST || t.dist < 100) return null;
 
-    const loc = location ?? DEMO_LOCATION;
-    const h   = isDesktop ? simHeading : heading;
-    // beta=90 → perfectly upright; real camera hold is ~75°.
-    // PITCH_OFFSET compensates for typical phone tilt when aiming at mountains.
-    const tiltAboveHorizon = (isDesktop ? 0 : pitch) - 90 + (isDesktop ? 0 : pitchOffset);
+      const s = project(R, t.v, projection);
+      if (!s || s.x < 0 || s.x > projection.viewW || s.y < 0 || s.y > projection.viewH) return null;
 
-    const computed = PEAKS.map((peak) => {
-      const dist = getDistanceM(loc.lat, loc.lng, peak.lat, peak.lng);
-      if (dist > MAX_DIST || dist < 100) return null;
+      const cosOff = pose.forward[0] * t.v[0] + pose.forward[1] * t.v[1] + pose.forward[2] * t.v[2];
+      const isFocus = toDeg(Math.acos(Math.min(1, cosOff))) < 3;
 
-      const az     = getBearing(loc.lat, loc.lng, peak.lat, peak.lng);
-      const elvAng = getElevAngle(loc.elev, peak.elev, dist);
-
-      const hDiff = shortAngle(az, h);          // +right
-      const vDiff = elvAng - tiltAboveHorizon;  // +above horizon
-
-      const x = 50 + (hDiff / H_FOV) * 100;    // %
-      const y = 50 - (vDiff / V_FOV) * 100;    // %
-
-      // Strict: only render peaks actually inside the camera FOV
-      if (x < 2 || x > 98 || y < 2 || y > 98) return null;
-
-      const distKm  = (dist / 1000).toFixed(1);
-      const elevFt  = Math.round(peak.elev * 3.28084).toLocaleString();
-      const isFocus = Math.abs(hDiff) < 5 && Math.abs(vDiff) < 4;
-
-      return { ...peak, x, y, dist, distKm, elevFt, isFocus, az };
+      return {
+        ...peak, x: s.x, y: s.y, dist: t.dist, az: t.az, elevAngle: t.elevAngle, isFocus,
+        distKm: (t.dist / 1000).toFixed(1),
+        elevFt: Math.round(peak.elev * 3.28084).toLocaleString(),
+      };
     })
       .filter(Boolean)
       .sort((a, b) => b.dist - a.dist);
+  }, [phase, R, pose, observer, projection]);
 
-    setLabels(computed);
-  }, [phase, location, heading, pitch, simHeading, isDesktop, orientSource, declination, pitchOffset]);
+  // True horizon line (a straight line under pinhole projection)
+  const horizon = useMemo(() => {
+    if (!pose) return null;
+    const a = project(R, dirVector(pose.heading - 15, 0), projection);
+    const b = project(R, dirVector(pose.heading + 15, 0), projection);
+    if (!a || !b) return null;
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, angle: toDeg(Math.atan2(b.y - a.y, b.x - a.x)) };
+  }, [R, pose, projection]);
+
+  // ── Align calibration: put the chosen summit under the crosshair ──────────
+  const alignToPeak = () => {
+    const peak = PEAKS.find((p) => p.name === alignPeak);
+    if (!pose || !peak) return;
+    const t = targetVector(observer, peak);
+    setCalibration((c) => ({
+      ...c,
+      headingOffset: shortAngle(c.headingOffset + shortAngle(t.az, pose.heading), 0),
+      pitchOffset: c.pitchOffset + (t.elevAngle - pose.pitch),
+    }));
+  };
 
   // ── Desktop drag-to-pan ────────────────────────────────────────────────────
   const onPointerDown = (e) => {
-    if (!isDesktop || phase !== "ready") return;
-    dragRef.current = { active: true, startX: e.clientX, startHeading: simHeading };
+    if (!isDesktop || phase !== "ready" || e.target.closest("button, input, select")) return;
+    dragRef.current = { active: true, startX: e.clientX, startY: e.clientY, startHeading: simHeading, startPitch: simPitch };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e) => {
     if (!isDesktop || !dragRef.current.active) return;
     const dx = e.clientX - dragRef.current.startX;
-    setSimHeading((dragRef.current.startHeading + dx * 0.35 + 720) % 360);
+    const dy = e.clientY - dragRef.current.startY;
+    setSimHeading(normDeg(dragRef.current.startHeading + dx * 0.15));
+    setSimPitch(Math.max(-45, Math.min(45, dragRef.current.startPitch - dy * 0.15)));
   };
   const onPointerUp = () => { dragRef.current.active = false; };
 
-  const effectiveHeading  = isDesktop ? simHeading : (heading ?? 0);
-  const compassReady      = !isDesktop && heading !== null;
-  const compassWaiting    = !isDesktop && heading === null;
+  const effectiveHeading  = pose?.heading ?? 0;
+  const compassReady      = !isDesktop && R !== null;
+  const compassWaiting    = !isDesktop && R === null;
   const gpsReady          = location !== null && !isDesktop;
+  const visibleFov        = (px) => (2 * toDeg(Math.atan(px / 2 / projection.f))).toFixed(0);
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -355,6 +469,8 @@ export default function ARPeaks() {
         <video
           ref={videoRef}
           autoPlay playsInline muted
+          onLoadedMetadata={onVideoResize}
+          onResize={onVideoResize}
           style={{
             ...styles.video,
             opacity: cameraOn ? 1 : 0,
@@ -511,11 +627,13 @@ export default function ARPeaks() {
               }} />
             </div>
 
-            {/* Horizon line */}
+            {/* Horizon line (projected — follows tilt and roll) */}
+            {horizon && (
             <div style={{
-              position: "absolute", left: 0, right: 0, top: "50%",
-              height: 1,
-              background: "linear-gradient(90deg, transparent 0%, rgba(56,189,248,0.15) 20%, rgba(56,189,248,0.15) 80%, transparent 100%)",
+              position: "absolute", left: horizon.x, top: horizon.y,
+              width: "200vmax", height: 1,
+              transform: `translate(-50%, -50%) rotate(${horizon.angle}deg)`,
+              background: "linear-gradient(90deg, transparent 0%, rgba(56,189,248,0.15) 40%, rgba(56,189,248,0.15) 60%, transparent 100%)",
             }}>
               <div style={{
                 position: "absolute", left: "50%", transform: "translateX(-50%)",
@@ -525,6 +643,7 @@ export default function ARPeaks() {
                 HORIZON
               </div>
             </div>
+            )}
 
             {/* ── COMPASS BAR ── */}
             <div style={{
@@ -676,44 +795,36 @@ export default function ARPeaks() {
                 lineHeight: 1.9, minWidth: 180,
               }}>
                 <div style={{ color: "var(--amber)", marginBottom: 6, letterSpacing: "0.1em" }}>// SENSOR DATA</div>
-                <div>source    {orientSource}</div>
-                <div>heading   {heading !== null ? Math.round(heading) + "°" : "null"}</div>
-                <div>pitch β   {Math.round(pitch)}°</div>
-                <div>lat       {(location ?? DEMO_LOCATION).lat.toFixed(4)}</div>
-                <div>lng       {(location ?? DEMO_LOCATION).lng.toFixed(4)}</div>
+                <div>source    {isDesktop ? "sim" : orientSource}{compassAccuracy != null && ` ±${Math.round(compassAccuracy)}°`}</div>
+                <div>heading   {pose ? Math.round(pose.heading) + "° true" : "null"}</div>
+                <div>pitch     {pose ? pose.pitch.toFixed(1) + "°" : "null"}</div>
+                <div>lat       {observer.lat.toFixed(5)}</div>
+                <div>lng       {observer.lng.toFixed(5)}</div>
+                <div>gps acc   {location?.accuracy != null ? "±" + Math.round(location.accuracy) + " m" : "demo"}</div>
+                <div>elev      {Math.round(observer.elev)} m ({observer.elevSource})</div>
+                <div>fov       {visibleFov(projection.viewW)}° × {visibleFov(projection.viewH)}°{videoSize ? ` (${videoSize.w}×${videoSize.h})` : ""}</div>
                 <div>peaks_vis {labels.length}</div>
 
                 <div style={{ color: "var(--amber)", margin: "8px 0 4px", letterSpacing: "0.1em" }}>// CALIBRATION</div>
 
-                <div style={{ marginBottom: 6 }}>
-                  <div style={{ marginBottom: 2 }}>
-                    declination {declination > 0 ? "+" : ""}{declination.toFixed(1)}°
-                  </div>
-                  <input type="range" min="-20" max="20" step="0.5"
-                    value={declination}
-                    onChange={e => setDeclination(parseFloat(e.target.value))}
-                    style={{ width: "100%", accentColor: "var(--amber)", pointerEvents: "all" }}
-                  />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#2a4560" }}>
-                    <span>−20° W</span><span>0</span><span>+20° E</span>
-                  </div>
-                </div>
+                <CalSlider label="declination" unit="°" min={-20} max={20} step={0.5}
+                  value={calibration.declination} onChange={(v) => updateCalibration({ declination: v })} />
+                <CalSlider label="camera fov" unit="°" min={45} max={90} step={0.5}
+                  value={calibration.fov} onChange={(v) => updateCalibration({ fov: v })} />
+                <CalSlider label="heading adj" unit="°" min={-30} max={30} step={0.5}
+                  value={calibration.headingOffset} onChange={(v) => updateCalibration({ headingOffset: v })} />
+                <CalSlider label="pitch adj" unit="°" min={-15} max={15} step={0.25}
+                  value={calibration.pitchOffset} onChange={(v) => updateCalibration({ pitchOffset: v })} />
 
-                <div>
-                  <div style={{ marginBottom: 2 }}>
-                    pitch offset {pitchOffset > 0 ? "+" : ""}{pitchOffset.toFixed(0)}°
-                    <span style={{ color: "#2a4560", marginLeft: 4 }}>
-                      {pitchOffset < 0 ? "↓ lower" : "↑ higher"}
-                    </span>
-                  </div>
-                  <input type="range" min="-30" max="10" step="1"
-                    value={pitchOffset}
-                    onChange={e => setPitchOffset(parseFloat(e.target.value))}
-                    style={{ width: "100%", accentColor: "var(--amber)", pointerEvents: "all" }}
-                  />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#2a4560" }}>
-                    <span>−30 (lower)</span><span>+10 (higher)</span>
-                  </div>
+                <div style={{ color: "#4a6580", fontSize: 9, margin: "6px 0 4px", lineHeight: 1.4 }}>
+                  Center a summit in the crosshair, then:
+                </div>
+                <div style={{ display: "flex", gap: 6, pointerEvents: "all" }}>
+                  <select value={alignPeak} onChange={(e) => setAlignPeak(e.target.value)} style={debugControl}>
+                    {PEAKS.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                  </select>
+                  <button onClick={alignToPeak} disabled={!pose} style={debugControl}>ALIGN</button>
+                  <button onClick={() => setCalibration(DEFAULT_CALIBRATION)} style={debugControl}>RESET</button>
                 </div>
               </div>
             )}
@@ -738,6 +849,26 @@ export default function ARPeaks() {
   );
 }
 
+const debugControl = {
+  background: "rgba(245,158,11,0.1)", color: "var(--amber)",
+  border: "1px solid rgba(245,158,11,0.3)", borderRadius: 2,
+  fontFamily: "'DM Mono', monospace", fontSize: 9, padding: "3px 6px",
+  pointerEvents: "all", cursor: "pointer",
+};
+
+// ─── Calibration Slider ───────────────────────────────────────────────────
+function CalSlider({ label, unit, value, min, max, step, onChange }) {
+  return (
+    <div style={{ marginBottom: 4 }}>
+      <div>{label.padEnd(12, "\u00a0")}{value > 0 ? "+" : ""}{value.toFixed(step < 1 ? 1 : 0)}{unit}</div>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        style={{ width: "100%", accentColor: "var(--amber)", pointerEvents: "all" }}
+      />
+    </div>
+  );
+}
+
 // ─── Peak Label Sub-component ─────────────────────────────────────────────
 function PeakLabel({ peak }) {
   const { x, y, name, elevFt, distKm, isFocus } = peak;
@@ -747,8 +878,8 @@ function PeakLabel({ peak }) {
       className="peak-label"
       style={{
         position: "absolute",
-        left: `${x}%`,
-        top: `${y}%`,
+        left: x,
+        top: y,
         transform: "translate(-50%, -100%)",
         pointerEvents: "none",
         transition: "left 0.08s linear, top 0.08s linear",
