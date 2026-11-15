@@ -929,7 +929,9 @@ function PeakLabel({ peak }) {
         top: y,
         transform: "translate(-50%, -100%)",
         pointerEvents: "none",
-        transition: "left 0.08s linear, top 0.08s linear",
+        // No CSS transition on position: it updates every frame (smoothing is
+        // done on the rotation), and WebKit restarts the transition on every
+        // change so the label never moves.
       }}
     >
       {/* Label box */}
