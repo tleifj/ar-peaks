@@ -75,8 +75,13 @@ function loadCalibration() {
   }
 }
 
+// Screen rotation relative to the device's natural (portrait) frame, which is
+// the frame DeviceOrientation reports in. WebKit (all iOS browsers) reports
+// screen.orientation.angle = 90 in portrait, so prefer window.orientation,
+// which WebKit and Chrome both define relative to portrait.
 function getScreenAngle() {
-  return screen.orientation?.angle ?? (typeof window.orientation === "number" ? window.orientation : 0);
+  if (typeof window.orientation === "number") return (window.orientation + 360) % 360;
+  return screen.orientation?.angle ?? 0;
 }
 
 function compassLabel(h) {
