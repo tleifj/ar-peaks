@@ -93,9 +93,9 @@ function compassLabel(h) {
 const styles = {
   root: {
     width: "100vw", height: "100dvh",
-    background: "#0a0e14",
+    background: "#f3ead8",
     position: "relative", overflow: "hidden",
-    fontFamily: "'DM Mono', 'Courier New', monospace",
+    fontFamily: "'Nunito', system-ui, sans-serif",
     userSelect: "none", WebkitUserSelect: "none",
     cursor: "crosshair",
     touchAction: "none",
@@ -445,10 +445,24 @@ export default function ARPeaks() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Barlow+Condensed:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,400..700,0..100;1,9..144,400..700,0..100&family=Nunito:wght@400;600;700&family=DM+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        :root { --amber: #f59e0b; --sky: #38bdf8; --green: #4ade80; --red: #f87171; }
-        body { overflow: hidden; }
+        :root {
+          --paper: #fbf6ec;
+          --cream: #f3ead8;
+          --sand:  #e3d4b6;
+          --bark:  #3a2e24;
+          --soil:  #6b5443;
+          --moss:  #5f7346;
+          --sage:  #a7b48c;
+          --pine:  #2e4536;
+          --clay:  #b5653a;
+          --ochre: #c9973f;
+          --serif: 'Fraunces', Georgia, serif;
+          --sans:  'Nunito', system-ui, sans-serif;
+          --mono:  'DM Mono', ui-monospace, monospace;
+        }
+        body { overflow: hidden; background: var(--cream); }
 
         @keyframes fadeUp {
           from { opacity: 0; transform: translateY(20px); }
@@ -456,10 +470,6 @@ export default function ARPeaks() {
         }
         @keyframes spin {
           to { transform: rotate(360deg); }
-        }
-        @keyframes scanLine {
-          0%   { transform: translateY(0); }
-          100% { transform: translateY(100vh); }
         }
         @keyframes pulse {
           0%, 100% { opacity: 1; }
@@ -471,22 +481,42 @@ export default function ARPeaks() {
         }
         .peak-label { animation: labelFade 0.3s ease forwards; }
         .btn-primary {
-          padding: 14px 36px;
-          background: var(--amber);
-          color: #0a0e14;
+          padding: 14px 34px;
+          background: var(--moss);
+          color: var(--paper);
           border: none;
-          border-radius: 3px;
-          font-family: 'Barlow Condensed', sans-serif;
-          font-size: 18px;
+          border-radius: 999px;
+          font-family: var(--sans);
+          font-size: 17px;
           font-weight: 700;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
+          letter-spacing: 0.01em;
           cursor: pointer;
+          box-shadow: 0 6px 18px rgba(58,46,36,0.18);
           transition: background 0.15s, transform 0.1s;
           pointer-events: all;
         }
-        .btn-primary:hover { background: #fbbf24; transform: translateY(-1px); }
+        .btn-primary:hover { background: var(--pine); transform: translateY(-1px); }
         .btn-primary:active { transform: translateY(0); }
+        .pill {
+          background: rgba(251,246,236,0.9);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(58,46,36,0.12);
+          border-radius: 999px;
+          box-shadow: 0 4px 14px rgba(58,46,36,0.18);
+          color: var(--soil);
+          font-family: var(--sans);
+        }
+        .card {
+          background: rgba(251,246,236,0.94);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(58,46,36,0.12);
+          border-radius: 16px;
+          box-shadow: 0 8px 24px rgba(58,46,36,0.22);
+          color: var(--bark);
+        }
+        .on-camera { text-shadow: 0 1px 3px rgba(40,30,20,0.6); }
       `}</style>
 
       <div
@@ -509,11 +539,11 @@ export default function ARPeaks() {
           }}
         />
 
-        {/* Sky gradient when no camera */}
+        {/* Dusky landscape gradient when no camera */}
         {!cameraOn && phase === "ready" && (
           <div style={{
             position: "absolute", inset: 0,
-            background: "linear-gradient(180deg, #0c1928 0%, #1a3a5c 45%, #2d6a8f 70%, #3d8fa0 85%, #4a7c5a 100%)",
+            background: "linear-gradient(180deg, #8c9f9b 0%, #b7b298 48%, #a48c66 74%, #6d6a45 88%, #4f5a38 100%)",
           }} />
         )}
 
@@ -523,68 +553,66 @@ export default function ARPeaks() {
             position: "absolute", inset: 0,
             display: "flex", flexDirection: "column",
             alignItems: "center", justifyContent: "center",
-            background: "linear-gradient(160deg, #060c14 0%, #0e1f36 50%, #081a10 100%)",
-            padding: 32, gap: 0,
+            background: "linear-gradient(180deg, var(--paper) 0%, var(--cream) 60%, var(--sand) 100%)",
+            padding: 32,
           }}>
             {/* Grid lines */}
             <div style={{
               position: "absolute", inset: 0,
               backgroundImage: `
-                linear-gradient(rgba(245,158,11,0.04) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(245,158,11,0.04) 1px, transparent 1px)
+                linear-gradient(rgba(95,115,70,0.09) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(95,115,70,0.09) 1px, transparent 1px)
               `,
               backgroundSize: "60px 60px",
             }} />
 
             <div style={{ animation: "fadeUp 0.6s ease both", textAlign: "center", position: "relative" }}>
-              {/* Icon */}
-              <div style={{ marginBottom: 28 }}>
-                <svg width="72" height="48" viewBox="0 0 72 48" fill="none">
-                  <path d="M36 4 L68 44 H4 Z" fill="none" stroke="var(--amber)" strokeWidth="1.5" />
-                  <path d="M36 4 L54 28 H18 Z" fill="rgba(245,158,11,0.08)" stroke="var(--amber)" strokeWidth="0.5" />
-                  <line x1="36" y1="4" x2="36" y2="0" stroke="var(--amber)" strokeWidth="1.5" />
-                  <circle cx="36" cy="4" r="2.5" fill="var(--amber)" />
+              <div style={{ marginBottom: 22 }}>
+                <svg width="64" height="44" viewBox="0 0 64 44" fill="none">
+                  <path d="M4 40 L24 12 Q26 9 28 12 L34 20 L40 13 Q42 10 44 13 L60 40 Z" fill="var(--moss)" />
+                  <path d="M24 12 Q26 9 28 12 L31 16 L27 19 L24 16 L21 18 Z" fill="var(--paper)" />
+                  <circle cx="50" cy="8" r="5" fill="var(--ochre)" />
                 </svg>
               </div>
 
               <div style={{
-                fontFamily: "'Barlow Condensed', sans-serif",
-                fontSize: 11, letterSpacing: "0.3em",
-                color: "var(--amber)", marginBottom: 12,
-                textTransform: "uppercase", opacity: 0.8,
+                fontFamily: "var(--sans)", fontWeight: 600,
+                fontSize: 13, letterSpacing: "0.12em",
+                color: "var(--clay)", marginBottom: 10,
+                textTransform: "uppercase",
               }}>
-                Augmented Reality
+                A field guide to the skyline
               </div>
 
               <h1 style={{
-                fontFamily: "'Barlow Condensed', sans-serif",
-                fontSize: 52, fontWeight: 700,
-                color: "#f0f4f8", letterSpacing: "0.02em",
-                lineHeight: 1, marginBottom: 8,
+                fontFamily: "var(--serif)",
+                fontVariationSettings: "'SOFT' 100, 'opsz' 144",
+                fontSize: 60, fontWeight: 600,
+                color: "var(--bark)", letterSpacing: "-0.01em",
+                lineHeight: 1, marginBottom: 14,
               }}>
-                PEAK<span style={{ color: "var(--amber)" }}>AR</span>
+                Peak <span style={{ fontStyle: "italic", color: "var(--moss)" }}>AR</span>
               </h1>
 
               <p style={{
-                color: "#4a6580", fontSize: 13, lineHeight: 1.6,
-                maxWidth: 260, margin: "0 auto 36px",
-                fontFamily: "'DM Mono', monospace",
+                color: "var(--soil)", fontSize: 16, lineHeight: 1.55,
+                maxWidth: 280, margin: "0 auto 32px",
+                fontFamily: "var(--sans)",
               }}>
-                Point your camera at the mountains.<br />
-                Discover every peak by name.
+                Point your camera at the mountains and learn every peak by name.
               </p>
 
               <button className="btn-primary" onClick={initialize}>
-                Start Experience
+                Begin exploring
               </button>
 
               <div style={{
-                marginTop: 20, color: "#2a4560", fontSize: 11,
-                fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em",
+                marginTop: 18, color: "var(--soil)", opacity: 0.75, fontSize: 13,
+                fontFamily: "var(--serif)", fontStyle: "italic",
               }}>
                 {isDesktop
-                  ? "[ desktop mode — drag to pan ]"
-                  : "[ requires camera + GPS + compass ]"}
+                  ? "Desktop mode — drag to look around"
+                  : "Uses your camera, location and compass"}
               </div>
             </div>
           </div>
@@ -596,16 +624,16 @@ export default function ARPeaks() {
             position: "absolute", inset: 0,
             display: "flex", flexDirection: "column",
             alignItems: "center", justifyContent: "center",
-            background: "#060c14", gap: 20,
+            background: "var(--cream)", gap: 18,
           }}>
             <div style={{
-              width: 48, height: 48, borderRadius: "50%",
-              border: "2px solid #1a2a3a",
-              borderTopColor: "var(--amber)",
-              animation: "spin 0.8s linear infinite",
+              width: 44, height: 44, borderRadius: "50%",
+              border: "3px solid var(--sand)",
+              borderTopColor: "var(--moss)",
+              animation: "spin 0.9s linear infinite",
             }} />
-            <div style={{ color: "#4a6580", fontSize: 12, letterSpacing: "0.15em" }}>
-              INITIALIZING SENSORS
+            <div style={{ color: "var(--soil)", fontSize: 17, fontFamily: "var(--serif)", fontStyle: "italic" }}>
+              Getting your bearings…
             </div>
           </div>
         )}
@@ -614,47 +642,19 @@ export default function ARPeaks() {
         {phase === "ready" && (
           <div style={styles.overlay}>
 
-            {/* Scan line effect */}
-            <div style={{
-              position: "absolute", left: 0, right: 0, height: 1,
-              background: "linear-gradient(90deg, transparent, rgba(245,158,11,0.08), transparent)",
-              animation: "scanLine 6s linear infinite",
-            }} />
-
-            {/* Corner brackets */}
-            {[
-              { top: 16, left: 16 },
-              { top: 16, right: 16 },
-              { bottom: 16, left: 16 },
-              { bottom: 16, right: 16 },
-            ].map((pos, i) => {
-              const flipH = i === 1 || i === 3;
-              const flipV = i === 2 || i === 3;
-              return (
-                <div key={i} style={{
-                  position: "absolute", ...pos,
-                  width: 24, height: 24,
-                  borderTop: flipV ? "none" : "1.5px solid rgba(245,158,11,0.4)",
-                  borderBottom: flipV ? "1.5px solid rgba(245,158,11,0.4)" : "none",
-                  borderLeft: flipH ? "none" : "1.5px solid rgba(245,158,11,0.4)",
-                  borderRight: flipH ? "1.5px solid rgba(245,158,11,0.4)" : "none",
-                }} />
-              );
-            })}
-
-            {/* Center crosshair */}
+            {/* Center sight */}
             <div style={{
               position: "absolute", top: "50%", left: "50%",
               transform: "translate(-50%, -50%)",
-              width: 32, height: 32,
+              width: 30, height: 30, borderRadius: "50%",
+              border: "1.5px solid rgba(251,246,236,0.7)",
+              boxShadow: "0 0 0 1px rgba(58,46,36,0.25), inset 0 0 0 1px rgba(58,46,36,0.25)",
             }}>
-              <div style={{ position: "absolute", top: "50%", left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.2)" }} />
-              <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "rgba(255,255,255,0.2)" }} />
               <div style={{
                 position: "absolute", top: "50%", left: "50%",
                 transform: "translate(-50%,-50%)",
                 width: 4, height: 4, borderRadius: "50%",
-                background: "rgba(255,255,255,0.4)",
+                background: "var(--paper)",
               }} />
             </div>
 
@@ -664,78 +664,75 @@ export default function ARPeaks() {
               position: "absolute", left: horizon.x, top: horizon.y,
               width: "200vmax", height: 1,
               transform: `translate(-50%, -50%) rotate(${horizon.angle}deg)`,
-              background: "linear-gradient(90deg, transparent 0%, rgba(56,189,248,0.15) 40%, rgba(56,189,248,0.15) 60%, transparent 100%)",
+              background: "linear-gradient(90deg, transparent 0%, rgba(251,246,236,0.35) 40%, rgba(251,246,236,0.35) 60%, transparent 100%)",
             }}>
-              <div style={{
+              <div className="on-camera" style={{
                 position: "absolute", left: "50%", transform: "translateX(-50%)",
-                top: 4, color: "rgba(56,189,248,0.4)", fontSize: 9,
-                fontFamily: "'DM Mono', monospace", letterSpacing: "0.2em",
+                top: 4, color: "rgba(251,246,236,0.75)", fontSize: 11,
+                fontFamily: "var(--serif)", fontStyle: "italic",
               }}>
-                HORIZON
+                horizon
               </div>
             </div>
             )}
 
             {/* ── COMPASS BAR ── */}
-            <div style={{
-              position: "absolute", top: 20, left: "50%",
+            <div className="pill" style={{
+              position: "absolute", top: 18, left: "50%",
               transform: "translateX(-50%)",
               display: "flex", alignItems: "center", gap: 10,
-              background: "rgba(6,12,20,0.85)",
-              backdropFilter: "blur(12px)",
-              border: "1px solid rgba(245,158,11,0.25)",
-              borderRadius: 2, padding: "7px 18px",
+              padding: "6px 16px 6px 12px",
               whiteSpace: "nowrap",
             }}>
               {/* Compass needle */}
               <svg width="16" height="16" viewBox="0 0 16 16">
-                <polygon points="8,1 10,13 8,11 6,13" fill="var(--amber)" />
-                <polygon points="8,15 6,3 8,5 10,3" fill="#2a4560" />
+                <polygon points="8,1 10,8 8,7 6,8" fill="var(--clay)" />
+                <polygon points="8,15 6,8 8,9 10,8" fill="var(--sand)" />
               </svg>
 
               <span style={{
-                fontFamily: "'Barlow Condensed', sans-serif",
-                fontSize: 20, fontWeight: 600, color: "#f0f4f8",
-                letterSpacing: "0.04em", minWidth: 44,
+                fontFamily: "var(--serif)",
+                fontVariationSettings: "'SOFT' 100",
+                fontSize: 20, fontWeight: 600, color: "var(--bark)",
+                minWidth: 44, fontVariantNumeric: "tabular-nums",
               }}>
                 {Math.round(effectiveHeading).toString().padStart(3, "0")}°
               </span>
 
               <span style={{
-                fontFamily: "'Barlow Condensed', sans-serif",
-                fontSize: 15, fontWeight: 600, color: "var(--amber)",
+                fontFamily: "var(--serif)", fontStyle: "italic",
+                fontSize: 16, fontWeight: 500, color: "var(--clay)",
                 minWidth: 32,
               }}>
                 {compassLabel(effectiveHeading)}
               </span>
 
-              <div style={{ width: 1, height: 14, background: "rgba(255,255,255,0.1)" }} />
+              <div style={{ width: 1, height: 16, background: "rgba(58,46,36,0.15)" }} />
 
               {/* Status indicators */}
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, fontSize: 11, fontWeight: 700 }}>
                 <span style={{
-                  fontSize: 9, letterSpacing: "0.1em", color: gpsReady ? "var(--green)" : "#2a4560",
+                  color: gpsReady ? "var(--moss)" : "var(--soil)", opacity: gpsReady ? 1 : 0.6,
                   animation: gpsReady ? "none" : "pulse 1.5s ease infinite",
                 }}>
-                  GPS{gpsReady ? " ✓" : " …"}
+                  {gpsReady ? "● GPS" : "○ GPS"}
                 </span>
                 <span style={{
-                  fontSize: 9, letterSpacing: "0.1em",
-                  color: compassReady ? "var(--green)" : isDesktop ? "#2a4560" : "#2a4560",
+                  color: compassReady ? "var(--moss)" : "var(--soil)", opacity: compassReady ? 1 : 0.6,
                   animation: (!compassReady && !isDesktop) ? "pulse 1.5s ease infinite" : "none",
                 }}>
-                  {isDesktop ? "SIM ●" : compassReady ? "HDG ✓" : "HDG …"}
+                  {isDesktop ? "◐ Sim" : compassReady ? "● Compass" : "○ Compass"}
                 </span>
               </div>
             </div>
 
             {horizonTicks.map(({ az, s }) => (
-              <div key={az} style={{
+              <div key={az} className="on-camera" style={{
                 position: "absolute", left: s.x, top: s.y, transform: "translate(-50%, -100%)",
-                color: "var(--sky)", fontSize: 9, fontFamily: "'DM Mono', monospace", textAlign: "center",
+                color: "var(--paper)", fontSize: 11, fontFamily: "var(--sans)", fontWeight: 600, textAlign: "center",
               }}>
                 {az % 90 === 0 ? compassLabel(az) : az}
-                <div style={{ width: 1, height: 10, background: "var(--sky)", margin: "0 auto" }} />
+                <div style={{ width: 1, height: 10, background: "rgba(251,246,236,0.8)", margin: "0 auto" }} />
               </div>
             ))}
 
@@ -746,46 +743,37 @@ export default function ARPeaks() {
 
             {/* Waiting for compass */}
             {compassWaiting && (
-              <div style={{
+              <div className="card" style={{
                 position: "absolute", top: "50%", left: "50%",
                 transform: "translate(-50%, -50%)",
-                background: "rgba(6,12,20,0.88)",
-                border: "1px solid rgba(245,158,11,0.3)",
-                borderRadius: 3, padding: "18px 28px",
+                padding: "20px 28px",
                 textAlign: "center", pointerEvents: "none",
               }}>
                 <div style={{
                   width: 28, height: 28, borderRadius: "50%",
-                  border: "2px solid #1a2a3a", borderTopColor: "var(--amber)",
-                  animation: "spin 0.8s linear infinite",
+                  border: "3px solid var(--sand)", borderTopColor: "var(--moss)",
+                  animation: "spin 0.9s linear infinite",
                   margin: "0 auto 12px",
                 }} />
-                <div style={{
-                  color: "var(--amber)", fontSize: 11,
-                  fontFamily: "'DM Mono', monospace", letterSpacing: "0.15em",
-                }}>
-                  AWAITING COMPASS SIGNAL
+                <div style={{ fontFamily: "var(--serif)", fontSize: 17, fontWeight: 600 }}>
+                  Finding north…
                 </div>
-                <div style={{
-                  color: "#2a4560", fontSize: 9, marginTop: 6,
-                  fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em",
-                }}>
-                  Point device toward sky · Move slowly
+                <div style={{ color: "var(--soil)", fontSize: 13, marginTop: 4, fontFamily: "var(--sans)" }}>
+                  Hold your phone up and move slowly
                 </div>
               </div>
             )}
 
             {/* No peaks in view (compass is working but nothing in frame) */}
             {!compassWaiting && labels.length === 0 && (
-              <div style={{
+              <div className="on-camera" style={{
                 position: "absolute", bottom: 90, left: "50%",
                 transform: "translateX(-50%)",
-                color: "rgba(255,255,255,0.25)", fontSize: 11,
-                letterSpacing: "0.15em", fontFamily: "'DM Mono', monospace",
+                color: "rgba(251,246,236,0.85)", fontSize: 15,
+                fontFamily: "var(--serif)", fontStyle: "italic",
                 textAlign: "center", whiteSpace: "nowrap",
               }}>
-                NO PEAKS IN FIELD OF VIEW
-                {isDesktop && " — DRAG TO PAN"}
+                No peaks in view{isDesktop && " — drag to look around"}
               </div>
             )}
 
@@ -796,46 +784,33 @@ export default function ARPeaks() {
               display: "flex", gap: 8, alignItems: "center",
             }}>
               {isDesktop && (
-                <div style={{
-                  background: "rgba(6,12,20,0.85)",
-                  border: "1px solid rgba(245,158,11,0.15)",
-                  borderRadius: 2, padding: "5px 14px",
-                  color: "#2a4560", fontSize: 10,
-                  letterSpacing: "0.15em",
-                  fontFamily: "'DM Mono', monospace",
-                }}>
-                  ← DRAG TO PAN →
+                <div className="pill" style={{ padding: "6px 14px", fontSize: 12, fontWeight: 600 }}>
+                  ← Drag to pan →
                 </div>
               )}
 
               <button
+                className="pill"
                 onClick={() => setShowDebug((v) => !v)}
                 style={{
-                  background: "rgba(6,12,20,0.85)",
-                  border: "1px solid rgba(245,158,11,0.15)",
-                  borderRadius: 2, padding: "5px 12px",
-                  color: "#2a4560", fontSize: 10,
-                  letterSpacing: "0.15em", cursor: "pointer",
-                  fontFamily: "'DM Mono', monospace",
-                  pointerEvents: "all",
+                  padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                  cursor: "pointer", pointerEvents: "all",
                 }}
               >
-                {showDebug ? "HIDE DEBUG" : "DEBUG"}
+                {showDebug ? "Hide details" : "Details"}
               </button>
             </div>
 
             {/* ── DEBUG PANEL ── */}
             {showDebug && (
-              <div style={{
-                position: "absolute", bottom: 56, right: 16,
-                background: "rgba(6,12,20,0.92)",
-                border: "1px solid rgba(245,158,11,0.2)",
-                borderRadius: 2, padding: "10px 14px",
-                color: "var(--green)", fontSize: 10,
-                fontFamily: "'DM Mono', monospace",
-                lineHeight: 1.9, minWidth: 180,
+              <div className="card" style={{
+                position: "absolute", bottom: 60, right: 16,
+                padding: "12px 16px",
+                color: "var(--soil)", fontSize: 10,
+                fontFamily: "var(--mono)",
+                lineHeight: 1.85, minWidth: 190, textAlign: "left",
               }}>
-                <div style={{ color: "var(--amber)", marginBottom: 6, letterSpacing: "0.1em" }}>// SENSOR DATA</div>
+                <div style={sectionHead}>Sensor data</div>
                 <div>build     {import.meta.env.VITE_BUILD_ID}</div>
                 <div>source    {isDesktop ? "sim" : orientSource}{compassAccuracy != null && ` ±${Math.round(compassAccuracy)}°`}{!isDesktop && ` · ${eventRate}/s`}</div>
                 <div>heading   {pose ? Math.round(pose.heading) + "° true" : "null"}</div>
@@ -844,7 +819,7 @@ export default function ARPeaks() {
                 <div>pitch     {pose ? pose.pitch.toFixed(1) + "°" : "null"}</div>
                 <div>lat       {observer.lat.toFixed(5)}</div>
                 <div>lng       {observer.lng.toFixed(5)}</div>
-                <div style={{ color: location ? undefined : "var(--red)" }}>
+                <div style={{ color: location ? undefined : "var(--clay)" }}>
                   gps acc   {location?.accuracy != null ? "±" + Math.round(location.accuracy) + " m" : "NONE — using demo location"}
                 </div>
                 <div>elev      {Math.round(observer.elev)} m ({observer.elevSource})</div>
@@ -852,7 +827,7 @@ export default function ARPeaks() {
                 <div>view      {Math.round(projection.viewW)}×{Math.round(projection.viewH)} @ {projection.screenAngle}°</div>
                 <div>peaks_vis {labels.length}</div>
 
-                <div style={{ color: "var(--amber)", margin: "8px 0 4px", letterSpacing: "0.1em" }}>// CALIBRATION</div>
+                <div style={{ ...sectionHead, marginTop: 10 }}>Calibration</div>
 
                 <CalSlider label="declination" unit="°" min={-20} max={20} step={0.5}
                   value={calibration.declination} onChange={(v) => updateCalibration({ declination: v })} />
@@ -863,15 +838,15 @@ export default function ARPeaks() {
                 <CalSlider label="pitch adj" unit="°" min={-15} max={15} step={0.25}
                   value={calibration.pitchOffset} onChange={(v) => updateCalibration({ pitchOffset: v })} />
 
-                <div style={{ color: "#4a6580", fontSize: 9, margin: "6px 0 4px", lineHeight: 1.4 }}>
-                  Center a summit in the crosshair, then:
+                <div style={{ color: "var(--soil)", fontSize: 11, margin: "6px 0 6px", lineHeight: 1.4, fontFamily: "var(--sans)" }}>
+                  Center a summit in the sight, then:
                 </div>
                 <div style={{ display: "flex", gap: 6, pointerEvents: "all" }}>
                   <select value={alignPeak} onChange={(e) => setAlignPeak(e.target.value)} style={debugControl}>
                     {PEAKS.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
                   </select>
-                  <button onClick={alignToPeak} disabled={!pose} style={debugControl}>ALIGN</button>
-                  <button onClick={() => setCalibration(DEFAULT_CALIBRATION)} style={debugControl}>RESET</button>
+                  <button onClick={alignToPeak} disabled={!pose} style={{ ...debugControl, background: "var(--moss)", color: "var(--paper)", borderColor: "var(--moss)" }}>Align</button>
+                  <button onClick={() => setCalibration(DEFAULT_CALIBRATION)} style={debugControl}>Reset</button>
                 </div>
               </div>
             )}
@@ -882,13 +857,13 @@ export default function ARPeaks() {
         {error && (
           <div style={{
             position: "absolute", bottom: 80, left: 16, right: 16,
-            background: "rgba(239,68,68,0.9)", backdropFilter: "blur(8px)",
-            borderRadius: 2, padding: "12px 16px",
-            color: "#fff", fontSize: 12, letterSpacing: "0.05em",
-            fontFamily: "'DM Mono', monospace",
-            border: "1px solid rgba(248,113,113,0.5)",
+            background: "var(--clay)",
+            borderRadius: 14, padding: "12px 16px",
+            color: "var(--paper)", fontSize: 14,
+            fontFamily: "var(--sans)", fontWeight: 600,
+            boxShadow: "0 8px 24px rgba(58,46,36,0.25)",
           }}>
-            ⚠ {error}
+            {error}
           </div>
         )}
       </div>
@@ -896,10 +871,15 @@ export default function ARPeaks() {
   );
 }
 
+const sectionHead = {
+  fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 14, fontWeight: 600,
+  color: "var(--bark)", marginBottom: 4,
+};
+
 const debugControl = {
-  background: "rgba(245,158,11,0.1)", color: "var(--amber)",
-  border: "1px solid rgba(245,158,11,0.3)", borderRadius: 2,
-  fontFamily: "'DM Mono', monospace", fontSize: 9, padding: "3px 6px",
+  background: "var(--cream)", color: "var(--bark)",
+  border: "1px solid rgba(58,46,36,0.2)", borderRadius: 999,
+  fontFamily: "var(--sans)", fontWeight: 600, fontSize: 11, padding: "4px 10px",
   pointerEvents: "all", cursor: "pointer",
 };
 
@@ -907,10 +887,10 @@ const debugControl = {
 function CalSlider({ label, unit, value, min, max, step, onChange }) {
   return (
     <div style={{ marginBottom: 4 }}>
-      <div>{label.padEnd(12, "\u00a0")}{value > 0 ? "+" : ""}{value.toFixed(step < 1 ? 1 : 0)}{unit}</div>
+      <div>{label.padEnd(12, " ")}{value > 0 ? "+" : ""}{value.toFixed(step < 1 ? 1 : 0)}{unit}</div>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        style={{ width: "100%", accentColor: "var(--amber)", pointerEvents: "all" }}
+        style={{ width: "100%", accentColor: "var(--moss)", pointerEvents: "all" }}
       />
     </div>
   );
@@ -934,35 +914,35 @@ function PeakLabel({ peak }) {
         // change so the label never moves.
       }}
     >
-      {/* Label box */}
+      {/* Label card */}
       <div style={{
-        background: isFocus
-          ? "rgba(245,158,11,0.95)"
-          : "rgba(6,12,20,0.82)",
+        background: isFocus ? "var(--moss)" : "rgba(251,246,236,0.92)",
         backdropFilter: "blur(6px)",
-        border: `1px solid ${isFocus ? "var(--amber)" : "rgba(245,158,11,0.25)"}`,
-        borderRadius: 2,
-        padding: isFocus ? "6px 12px" : "4px 10px",
+        WebkitBackdropFilter: "blur(6px)",
+        border: `1px solid ${isFocus ? "var(--pine)" : "rgba(58,46,36,0.12)"}`,
+        borderRadius: 12,
+        padding: isFocus ? "7px 14px" : "5px 11px",
         textAlign: "center",
         whiteSpace: "nowrap",
-        transition: "all 0.15s",
-        boxShadow: isFocus ? "0 0 20px rgba(245,158,11,0.4)" : "0 2px 12px rgba(0,0,0,0.5)",
+        transition: "background 0.15s, padding 0.15s",
+        boxShadow: isFocus ? "0 8px 22px rgba(46,69,54,0.45)" : "0 4px 14px rgba(58,46,36,0.3)",
       }}>
         <div style={{
-          fontFamily: "'Barlow Condensed', sans-serif",
-          fontWeight: 700,
-          fontSize: isFocus ? 15 : 13,
-          color: isFocus ? "#0a0e14" : "#e8edf2",
-          letterSpacing: "0.04em",
-          textTransform: "uppercase",
+          fontFamily: "var(--serif)",
+          fontVariationSettings: "'SOFT' 100",
+          fontWeight: 600,
+          fontSize: isFocus ? 17 : 14,
+          color: isFocus ? "var(--paper)" : "var(--bark)",
+          lineHeight: 1.15,
         }}>
           {name}
         </div>
         <div style={{
-          fontFamily: "'DM Mono', monospace",
-          fontSize: 9,
-          color: isFocus ? "rgba(10,14,20,0.7)" : "rgba(245,158,11,0.7)",
-          marginTop: 2, letterSpacing: "0.06em",
+          fontFamily: "var(--sans)",
+          fontWeight: 600,
+          fontSize: 10,
+          color: isFocus ? "rgba(251,246,236,0.85)" : "var(--soil)",
+          marginTop: 2,
         }}>
           {elevFt} ft · {distKm} km
         </div>
@@ -970,24 +950,22 @@ function PeakLabel({ peak }) {
 
       {/* Stem line */}
       <div style={{
-        width: 1,
+        width: 1.5,
         height: isFocus ? 36 : 20,
-        background: isFocus
-          ? "linear-gradient(180deg, var(--amber) 0%, transparent 100%)"
-          : "linear-gradient(180deg, rgba(245,158,11,0.4) 0%, transparent 100%)",
+        background: "linear-gradient(180deg, rgba(251,246,236,0.9) 0%, rgba(251,246,236,0) 100%)",
         margin: "0 auto",
         transition: "height 0.15s",
       }} />
 
       {/* Base dot */}
       <div style={{
-        width: isFocus ? 6 : 4,
-        height: isFocus ? 6 : 4,
+        width: isFocus ? 8 : 6,
+        height: isFocus ? 8 : 6,
         borderRadius: "50%",
-        background: isFocus ? "var(--amber)" : "rgba(245,158,11,0.5)",
+        background: isFocus ? "var(--moss)" : "var(--paper)",
+        border: `1.5px solid ${isFocus ? "var(--paper)" : "rgba(58,46,36,0.4)"}`,
         margin: "0 auto",
-        boxShadow: isFocus ? "0 0 8px var(--amber)" : "none",
-        transition: "all 0.15s",
+        transition: "width 0.15s, height 0.15s",
       }} />
     </div>
   );
